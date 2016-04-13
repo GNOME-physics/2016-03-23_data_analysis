@@ -1,0 +1,116 @@
+#!/usr/bin/env python
+import math
+import glob
+
+import numpy
+import h5py
+
+from glue.segments import segment, segmentlist, segmentlistdict
+
+from gwpy.timeseries import TimeSeries, TimeSeriesList
+from gwpy.segments import SegmentList
+from gwpy.plotter import TimeSeriesPlot, SpectrogramPlot
+
+import gnome_da
+
+station_map = {
+    "berkeley": 'r',
+    "mainz": 'b',
+    "fribourg": 'g',
+    "hayward": 'c',
+    "krakow": 'k'
+}
+
+all_plot = TimeSeriesPlot()
+full_seglist = segmentlist([])
+for station, color in station_map.iteritems():
+    data_order = {}
+    print station, len(glob.glob("data/GNOMEDrive/gnome/serverdata/%s01/2016/03/23/%s01_20160323_*.hdf5" % (station, station)))
+    for fname in glob.glob("data/GNOMEDrive/gnome/serverdata/%s01/2016/03/23/%s01_20160323_*.hdf5" % (station, station)):
+        hfile = h5py.File(fname, "r")
+        data_order[gnome_da._file_to_segment(hfile)] = hfile
+
+    seglist = segmentlist(data_order.keys())
+    seglist.sort()
+    with open("%s_segments.txt" % station, "w") as fout:
+        for seg in seglist:
+            print >>fout, "%10.9f %10.9f" % seg
+
+    # This is just to get metadata
+    setname = "MagneticFields"
+    full_data = TimeSeriesList()
+    for seg in seglist:
+        full_data.append(gnome_da.retrieve_data_timeseries(data_order[seg], "MagneticFields"))
+        data_order[seg].close()
+    del data_order
+
+    seglist.coalesce()
+    print seglist
+    start, end = int(seglist[0][0]), int(numpy.ceil(seglist[-1][1]))
+
+    plot = TimeSeriesPlot()
+    ax = plot.gca()
+    for ts in full_data:
+        ax.plot(ts, color=color)
+    ax.set_title(station)
+    plot.add_state_segments(SegmentList(seglist), plotargs={'label': 'data present', 'facecolor': 'g', 'edgecolor': 'k'})
+    ax.set_xlim(seglist[0][0], seglist[-1][1])
+    plot.savefig("%s_time_series_%d_%d.png" % (station, start, end))
+    plot.close()
+
+    # AGG complexity starts to complain with large numbers of points
+    #import pdb; pdb.set_trace()
+    from astropy.units import Quantity
+    for d in full_data:
+        d.x0 = Quantity(int(d.x0.value * 1000), d.xunit)
+        d.dx = Quantity(1, d.xunit)
+    full_data.coalesce()
+    for d in full_data:
+        d.x0 = Quantity(d.x0.value / 1000, d.xunit)
+        d.dx = Quantity(0.001, d.xunit)
+
+    plot = SpectrogramPlot()
+    white_plot = SpectrogramPlot()
+    ax = plot.gca()
+    wax = white_plot.gca()
+    for ts in full_data:
+        print ts.x0
+        if (len(ts) * ts.dt).value < 60:
+            continue
+        spec = ts.spectrogram(60, fftlength=6, overlap=3)
+        ax.plot(spec)
+        wspec = spec.ratio('median')
+        wax.plot(wspec, vmin=0.1, vmax=10)
+    ax.set_title(station)
+    ax.set_ylim(1e-1, 500)
+    ax.set_yscale('log')
+    wax.set_title(station)
+    wax.set_ylim(1e-1, 500)
+    wax.set_yscale('log')
+    plot.add_colorbar(log=True)
+    plot.add_state_segments(SegmentList(seglist), plotargs={'label': 'data present', 'facecolor': 'g', 'edgecolor': 'k'})
+    ax.set_xlim(seglist[0][0], seglist[-1][1])
+    wax.set_xlim(seglist[0][0], seglist[-1][1])
+    plot.savefig("%s_spectrogram_%d_%d.png" % (station, start, end))
+    plot.close()
+
+    white_plot.add_colorbar(log=True)
+    white_plot.add_state_segments(SegmentList(seglist), plotargs={'label': 'data present', 'facecolor': 'g', 'edgecolor': 'k'})
+    white_plot.savefig("%s_whitened_spectrogram_%d_%d.png" % (station, start, end))
+    white_plot.close()
+
+    ax = all_plot.gca()
+    for ts in full_data:
+        ax.plot(ts, color=color)
+
+    full_seglist.extend(seglist)
+    full_seglist.coalesce()
+
+    #if len(seglist) == 1:
+
+exit()
+ax = all_plot.gca()
+ax.set_xlim(full_seglist[0][0], full_seglist[-1][1])
+ax.set_titile("all stations")
+all_plot.savefig("time_series.png")
+all_plot.close()
