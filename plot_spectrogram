@@ -9,7 +9,7 @@ from glue.segments import segment, segmentlist, segmentlistdict
 
 from gwpy.timeseries import TimeSeries, TimeSeriesList
 from gwpy.segments import SegmentList
-from gwpy.plotter import TimeSeriesPlot, SpectrogramPlot
+from gwpy.plotter import TimeSeriesPlot, SpectrogramPlot, SpectrumPlot
 
 import gnome_da
 
@@ -69,6 +69,16 @@ for station, color in station_map.iteritems():
         d.x0 = Quantity(d.x0.value / 1000, d.xunit)
         d.dx = Quantity(0.001, d.xunit)
 
+    plot = SpectrumPlot()
+    for d in full_data:
+        spectrum = d.asd(8, 4)
+        ax = plot.gca()
+        ax.plot(spectrum)
+    ax.set_xscale('log')
+    ax.set_yscale('log')
+    ax.set_xlim(1e-1, 500)
+    plot.savefig("%s_spectrum_%d_%d.png" % (station, start, end))
+
     plot = SpectrogramPlot()
     white_plot = SpectrogramPlot()
     ax = plot.gca()
@@ -105,8 +115,6 @@ for station, color in station_map.iteritems():
 
     full_seglist.extend(seglist)
     full_seglist.coalesce()
-
-    #if len(seglist) == 1:
 
 exit()
 ax = all_plot.gca()
