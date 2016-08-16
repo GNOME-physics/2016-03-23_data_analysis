@@ -11,7 +11,12 @@ from gwpy.timeseries import TimeSeries, TimeSeriesList
 from gwpy.segments import SegmentList
 from gwpy.plotter import TimeSeriesPlot, SpectrogramPlot, SpectrumPlot
 
+from astropy.units import Quantity
+
 import gnome_da
+
+import matplotlib
+matplotlib.rcParams['axes.unicode_minus'] = False
 
 station_map = {
     "berkeley": 'r',
@@ -23,13 +28,22 @@ station_map = {
 
 all_plot = TimeSeriesPlot()
 full_seglist = segmentlist([])
+
 for station, color in station_map.iteritems():
     data_order = {}
-    print station, len(glob.glob("data/GNOMEDrive/gnome/serverdata/%s01/2016/03/23/%s01_20160323_*.hdf5" % (station, station)))
-    for fname in glob.glob("data/GNOMEDrive/gnome/serverdata/%s01/2016/03/23/%s01_20160323_*.hdf5" % (station, station)):
+    #print station, len(glob.glob("/GNOMEDrive/gnome/serverdata/%s01/2016/03/23/%s01_20160323_*.hdf5" % (station, station)))
+
+    #
+    # Figure out the order of the data files to fill in the time series
+    #
+    for fname in glob.glob("/GNOMEDrive/gnome/serverdata/%s01/2016/03/23/%s01_20160323_*.hdf5" % (station, station)):
         hfile = h5py.File(fname, "r")
         data_order[gnome_da._file_to_segment(hfile)] = hfile
 
+    #
+    # Generate an ASCII representation of the GPS timestamped segments of time
+    # covered by the input data
+    #
     seglist = segmentlist(data_order.keys())
     seglist.sort()
     with open("%s_segments.txt" % station, "w") as fout:
@@ -46,8 +60,15 @@ for station, color in station_map.iteritems():
 
     seglist.coalesce()
     print seglist
-    start, end = int(seglist[0][0]), int(numpy.ceil(seglist[-1][1]))
+    try:
+        start, end = int(seglist[0][0]), int(numpy.ceil(seglist[-1][1]))
+    except:
+        print "Unable to process data of station " + station + "... skipping."
+        continue
 
+    #
+    # Generate a plot of the data time series
+    #
     plot = TimeSeriesPlot()
     ax = plot.gca()
     for ts in full_data:
@@ -59,8 +80,6 @@ for station, color in station_map.iteritems():
     plot.close()
 
     # AGG complexity starts to complain with large numbers of points
-    #import pdb; pdb.set_trace()
-    from astropy.units import Quantity
     for d in full_data:
         d.x0 = Quantity(int(d.x0.value * 1000), d.xunit)
         d.dx = Quantity(1, d.xunit)
@@ -69,6 +88,9 @@ for station, color in station_map.iteritems():
         d.x0 = Quantity(d.x0.value / 1000, d.xunit)
         d.dx = Quantity(0.001, d.xunit)
 
+    #
+    # Generate an amplitude spectrum density plot
+    #
     plot = SpectrumPlot()
     for d in full_data:
         spectrum = d.asd(8, 4)
@@ -79,6 +101,10 @@ for station, color in station_map.iteritems():
     ax.set_xlim(1e-1, 500)
     plot.savefig("%s_spectrum_%d_%d.png" % (station, start, end))
 
+    #
+    # Generate a spectorgram plot, and a normalized spectrogram plot
+    # norm: \sqrt{S(f,t)} / \sqrt{\overbar{S(f)}}
+    #
     plot = SpectrogramPlot()
     white_plot = SpectrogramPlot()
     ax = plot.gca()
@@ -89,7 +115,9 @@ for station, color in station_map.iteritems():
             continue
         spec = ts.spectrogram(60, fftlength=6, overlap=3)
         ax.plot(spec)
+        numpy.savetxt("%s_%d_spec_data.txt.gz" %(station, ts.x0.value), spec.data)
         wspec = spec.ratio('median')
+        numpy.savetxt("%s_%d_wspec_data.txt.gz" %(station, ts.x0.value), wspec.data)
         wax.plot(wspec, vmin=0.1, vmax=10)
     ax.set_title(station)
     ax.set_ylim(1e-1, 500)
@@ -116,7 +144,13 @@ for station, color in station_map.iteritems():
     full_seglist.extend(seglist)
     full_seglist.coalesce()
 
+    # TODO: Check coherence with other channels
+
 exit()
+
+#
+# Generate a plot of all the station's time series
+#
 ax = all_plot.gca()
 ax.set_xlim(full_seglist[0][0], full_seglist[-1][1])
 ax.set_titile("all stations")
